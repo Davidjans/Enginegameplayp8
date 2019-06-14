@@ -9,9 +9,24 @@ public interface IEnemyMovementState
    void OnExit();
 }
 
+[System.Serializable]
+public class WanderSettings
+{
+    public float m_WanderCircleDistance;
+    public float m_WanderCircleRadius;
+    public float m_WanderNoiseAngle;
+}
+
+[System.Serializable]
+public class AvoidanceSettings
+{
+    public float m_AvoidanceDistance;
+    public float m_MaxAvoidanceForce;
+}
+
 public class EnemyMovement : MonoBehaviour
 {
-    public IEnemyMovementState m_MovementState;
+    public List<IEnemyMovementState> m_MovementState = new List<IEnemyMovementState>();
     public float m_Mass = 70;
     public float m_MaxForce = 5 / 3.6f;
     public float m_MaxSpeed = 5 / 3.6f;
@@ -31,11 +46,13 @@ public class EnemyMovement : MonoBehaviour
     public Vector3 m_VelocityDesired;
     [HideInInspector]
     public Vector3 m_Steering;
+    [HideInInspector]
+    public bool m_Arrival;
 
 
-    public float m_WanderCircleDistance;
-    public float m_WanderCircleRadius;
-    public float m_WanderNoiseAngle;
+    public WanderSettings m_WanderSettings;
+
+    public AvoidanceSettings m_AvoidanceSettings;
 
     [SerializeField] private float m_ArrivalDistance;
 
@@ -45,50 +62,37 @@ public class EnemyMovement : MonoBehaviour
     void Start()
     {
         m_Position = transform.position;
-        if(m_StartState == 0)
-        {
-            SwitchState(new Seek(this));
-        }
-        else if (m_StartState == 1)
-        {
-            SwitchState(new Flee(this));
-        }
-        else if (m_StartState == 2)
-        {
-            SwitchState(new Wander(this));
-        }
-        else if (m_StartState == 3)
-        {
-            SwitchState(new Pursue(this));
-        }
-        else if (m_StartState == 4)
-        {
-            SwitchState(new Evade(this));
-        }
-        else if (m_StartState == 5)
-        {
-            SwitchState(new PathFollowing(this));
-        }
+        SelectStartState();
     }
     
     private void FixedUpdate()
     {
-        m_MovementState.Update();
+        m_Steering = Vector3.zero;
+        m_Arrival = false;
+        for (int i = 0; i < m_MovementState.Count; i++)
+        {
+            m_MovementState[i].Update();
+            Debug.Log(m_VelocityDesired);
+            m_Steering += m_VelocityDesired;
+            
+        }
+        SetRotation();
+        
         Debug.DrawRay(transform.position, 2 * m_Velocity, Color.red);
         Debug.DrawRay(transform.position, 2 * m_VelocityDesired, Color.red);
         transform.position = m_Position;
+        
     }
 
-    public void SetRotation(bool slowDown)
+    public void SetRotation()
     {
         float maxSpeed = m_MaxSpeed;
-        if (slowDown)
+        if (m_Arrival)
         {
-           
             maxSpeed = Arrival(maxSpeed);
         }
 
-        m_Steering = m_VelocityDesired - m_Velocity;
+        //m_Steering = m_VelocityDesired - m_Velocity;
 
         m_Steering = Vector3.ClampMagnitude(m_Steering, m_MaxForce);
         m_Steering = m_Steering / m_Mass;
@@ -96,15 +100,36 @@ public class EnemyMovement : MonoBehaviour
         m_Position += m_Velocity * Time.deltaTime;
     }
 
-    public void SwitchState(IEnemyMovementState stateToSwitch)
+    public void AddState(IEnemyMovementState StateToAdd)
     {
-        if(m_MovementState != null)
+        bool notIn = true;
+        if(m_MovementState.Count != 0)
         {
-            m_MovementState.OnExit();
+            for (int i = 0; i < m_MovementState.Count; i++)
+            {
+                if (StateToAdd == m_MovementState[i])
+                    notIn = false;
+            }
         }
-        m_MovementState = stateToSwitch;
-        if (stateToSwitch != null)
-            m_MovementState.OnEnter();
+        if (notIn)
+        {
+            m_MovementState.Add(StateToAdd);
+            if (StateToAdd != null)
+                m_MovementState[m_MovementState.Count - 1].OnEnter();
+        }
+    }
+
+    public void RemoveState(IEnemyMovementState StateToRemove)
+    {
+        for (int i = 0; i < m_MovementState.Count; i++)
+        {
+            if(StateToRemove == m_MovementState[i])
+            {
+                if (StateToRemove != null)
+                    m_MovementState[m_MovementState.Count].OnEnter();
+                m_MovementState.Add(StateToRemove);
+            }
+        }
     }
 
     private float Arrival(float maxSpeed)
@@ -130,6 +155,36 @@ public class EnemyMovement : MonoBehaviour
         }
         return tMin;
     }
+
+    private void SelectStartState()
+    {
+        
+        if (m_StartState == 0)
+        {
+            AddState(new Seek(this));
+        }
+        else if (m_StartState == 1)
+        {
+            AddState(new Flee(this));
+        }
+        else if (m_StartState == 2)
+        {
+            AddState(new Wander(this));
+        }
+        else if (m_StartState == 3)
+        {
+            AddState(new Pursue(this));
+        }
+        else if (m_StartState == 4)
+        {
+            AddState(new Evade(this));
+        }
+        else if (m_StartState == 5)
+        {
+            AddState(new PathFollowing(this));
+        }
+        AddState(new CollisionAvoidance(this));
+    }
 }
 
 public class Seek : IEnemyMovementState
@@ -148,7 +203,7 @@ public class Seek : IEnemyMovementState
     public void Update()
     {
         m_EnemyMovement.m_VelocityDesired = (m_EnemyMovement.m_TargetTransform.position - m_EnemyMovement.m_Position).normalized * m_EnemyMovement.m_MaxSpeed;
-        m_EnemyMovement.SetRotation( true);
+        m_EnemyMovement.m_Arrival = true;
     }
 
     public void OnExit()
@@ -173,7 +228,6 @@ public class Flee : IEnemyMovementState
     public void Update()
     {
         m_EnemyMovement.m_VelocityDesired = (m_EnemyMovement.m_Position - m_EnemyMovement.m_TargetTransform.position).normalized * m_EnemyMovement.m_MaxSpeed;
-        m_EnemyMovement.SetRotation(false);
     }
 
     public void OnExit()
@@ -198,17 +252,16 @@ public class Wander : IEnemyMovementState
 
     public void Update()
     {
-        m_WanderAngle += Random.Range(-0.5f * m_EnemyMovement.m_WanderNoiseAngle * Mathf.Deg2Rad,
-            0.5f * m_EnemyMovement.m_WanderNoiseAngle * Mathf.Deg2Rad);
+        m_WanderAngle += Random.Range(-0.5f * m_EnemyMovement.m_WanderSettings.m_WanderNoiseAngle * Mathf.Deg2Rad,
+            0.5f * m_EnemyMovement.m_WanderSettings.m_WanderNoiseAngle * Mathf.Deg2Rad);
 
-        Vector3 centerOfCircle = m_EnemyMovement.m_Position + m_EnemyMovement.m_Velocity.normalized * m_EnemyMovement.m_WanderCircleRadius;
-        Vector3 offset = new Vector3(m_EnemyMovement.m_WanderCircleRadius * (float)Mathf.Cos(m_WanderAngle),
+        Vector3 centerOfCircle = m_EnemyMovement.m_Position + m_EnemyMovement.m_Velocity.normalized * m_EnemyMovement.m_WanderSettings.m_WanderCircleRadius;
+        Vector3 offset = new Vector3(m_EnemyMovement.m_WanderSettings.m_WanderCircleRadius * (float)Mathf.Cos(m_WanderAngle),
             0.0f,
-            m_EnemyMovement.m_WanderCircleRadius * (float)Mathf.Sin(m_WanderAngle));
+            m_EnemyMovement.m_WanderSettings.m_WanderCircleRadius * (float)Mathf.Sin(m_WanderAngle));
         
 
         m_EnemyMovement.m_VelocityDesired = centerOfCircle + offset;
-        m_EnemyMovement.SetRotation(false);
     }
 
     public void OnExit()
@@ -232,7 +285,8 @@ public class Pursue : IEnemyMovementState
         m_Target = m_EnemyMovement.m_TargetTransform.GetComponent<EnemyMovement>();
         if (m_Target == null)
         {
-            m_EnemyMovement.SwitchState(new Seek(m_EnemyMovement));
+            m_EnemyMovement.AddState(new Seek(m_EnemyMovement));
+            m_EnemyMovement.RemoveState(new Pursue(m_EnemyMovement));
         }
     }
 
@@ -240,7 +294,7 @@ public class Pursue : IEnemyMovementState
     {
         Vector3 predict = m_EnemyMovement.m_TargetTransform.position + m_EnemyMovement.m_TimeAhead * m_Target.m_Velocity;
         m_EnemyMovement.m_VelocityDesired = (predict - m_EnemyMovement.m_Position).normalized * m_EnemyMovement.m_MaxSpeed;
-        m_EnemyMovement.SetRotation(true);
+        m_EnemyMovement.m_Arrival = true;
     }
 
     public void OnExit()
@@ -264,7 +318,8 @@ public class Evade : IEnemyMovementState
         m_Target = m_EnemyMovement.m_TargetTransform.GetComponent<EnemyMovement>();
         if (m_Target == null)
         {
-            m_EnemyMovement.SwitchState(new Seek(m_EnemyMovement));
+            m_EnemyMovement.AddState(new Seek(m_EnemyMovement));
+            m_EnemyMovement.RemoveState(new Evade(m_EnemyMovement));
         }
     }
 
@@ -272,7 +327,7 @@ public class Evade : IEnemyMovementState
     {
         Vector3 predict = m_EnemyMovement.m_TargetTransform.position + m_EnemyMovement.m_TimeAhead * m_Target.m_Velocity;
         m_EnemyMovement.m_VelocityDesired = (predict - m_EnemyMovement.m_Position).normalized * m_EnemyMovement.m_MaxSpeed;
-        m_EnemyMovement.SetRotation(true);
+        m_EnemyMovement.m_Arrival = true;
     }
 
     public void OnExit()
@@ -306,7 +361,6 @@ public class PathFollowing : IEnemyMovementState
     public void Update()
     {
         m_EnemyMovement.m_VelocityDesired = (m_EnemyMovement.m_TargetTransform.position - m_EnemyMovement.m_Position).normalized * m_EnemyMovement.m_MaxSpeed;
-        m_EnemyMovement.SetRotation(false);
 
         if (Vector3.Distance(m_EnemyMovement.m_Position, m_EnemyMovement.m_TargetTransform.position) <= 0.5f)
         {
@@ -325,6 +379,50 @@ public class PathFollowing : IEnemyMovementState
             }
             Debug.Log(m_CurrentWaypoint);
             m_EnemyMovement.m_TargetTransform = m_EnemyMovement.m_PathFollowingWaypoints[m_CurrentWaypoint];
+        }
+    }
+
+    public void OnExit()
+    {
+
+    }
+}
+
+public class CollisionAvoidance : IEnemyMovementState
+{
+    private EnemyMovement m_EnemyMovement;
+
+    private const int m_ObstacleLayer = 1 << 8;
+
+    private RaycastHit m_Hit;
+    private bool m_HitFound = false;
+    private Vector3 m_SensorPosition;
+
+    public CollisionAvoidance(EnemyMovement refObject)
+    {
+        m_EnemyMovement = refObject;
+    }
+
+    public void OnEnter()
+    {
+    }
+
+    public void Update()
+    {
+        if(Physics.Raycast(m_EnemyMovement.m_Position, m_EnemyMovement.m_Velocity, out m_Hit,
+            m_EnemyMovement.m_AvoidanceSettings.m_AvoidanceDistance, m_ObstacleLayer, QueryTriggerInteraction.Ignore))
+        {
+            m_HitFound = true;
+
+            m_SensorPosition = m_EnemyMovement.m_Position + m_EnemyMovement.m_Velocity.normalized * m_EnemyMovement.m_AvoidanceSettings.m_AvoidanceDistance;
+
+            Vector3 velocityDesired = (m_SensorPosition - m_Hit.collider.transform.position).normalized * m_EnemyMovement.m_AvoidanceSettings.m_MaxAvoidanceForce;
+            Vector3 positionTarget = m_SensorPosition + velocityDesired;
+            m_EnemyMovement.m_VelocityDesired = velocityDesired;
+        }
+        else
+        {
+            m_HitFound = false;
         }
     }
 
