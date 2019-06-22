@@ -4,9 +4,9 @@ using UnityEngine;
 
 public interface IEnemyMovementState
 {
-   void OnEnter();
-   void Update();
-   void OnExit();
+    void OnEnter();
+    void Update();
+    void OnExit();
 }
 
 [System.Serializable]
@@ -35,9 +35,11 @@ public class EnemyMovement : MonoBehaviour
     public int m_StartState;
 
     public Transform m_TargetTransform;
-    
+
     public float m_TimeAhead;
 
+    [HideInInspector]
+    public bool m_HasTreassure;
     [HideInInspector]
     public Vector3 m_Position;
     [HideInInspector]
@@ -64,7 +66,7 @@ public class EnemyMovement : MonoBehaviour
         m_Position = transform.position;
         SelectStartState();
     }
-    
+
     private void FixedUpdate()
     {
         m_Steering = Vector3.zero;
@@ -72,16 +74,15 @@ public class EnemyMovement : MonoBehaviour
         for (int i = 0; i < m_MovementState.Count; i++)
         {
             m_MovementState[i].Update();
-            Debug.Log(m_VelocityDesired);
             m_Steering += m_VelocityDesired;
-            
+
         }
         SetRotation();
-        
+
         Debug.DrawRay(transform.position, 2 * m_Velocity, Color.red);
         Debug.DrawRay(transform.position, 2 * m_VelocityDesired, Color.red);
         transform.position = m_Position;
-        
+
     }
 
     public void SetRotation()
@@ -103,7 +104,7 @@ public class EnemyMovement : MonoBehaviour
     public void AddState(IEnemyMovementState StateToAdd)
     {
         bool notIn = true;
-        if(m_MovementState.Count != 0)
+        if (m_MovementState.Count != 0)
         {
             for (int i = 0; i < m_MovementState.Count; i++)
             {
@@ -123,7 +124,7 @@ public class EnemyMovement : MonoBehaviour
     {
         for (int i = 0; i < m_MovementState.Count; i++)
         {
-            if(StateToRemove == m_MovementState[i])
+            if (StateToRemove == m_MovementState[i])
             {
                 if (StateToRemove != null)
                     m_MovementState[m_MovementState.Count].OnEnter();
@@ -158,7 +159,7 @@ public class EnemyMovement : MonoBehaviour
 
     private void SelectStartState()
     {
-        
+
         if (m_StartState == 0)
         {
             AddState(new Seek(this));
@@ -184,6 +185,8 @@ public class EnemyMovement : MonoBehaviour
             AddState(new PathFollowing(this));
         }
         AddState(new CollisionAvoidance(this));
+        AddState(new WallAvoidance(this));
+
     }
 }
 
@@ -259,7 +262,7 @@ public class Wander : IEnemyMovementState
         Vector3 offset = new Vector3(m_EnemyMovement.m_WanderSettings.m_WanderCircleRadius * (float)Mathf.Cos(m_WanderAngle),
             0.0f,
             m_EnemyMovement.m_WanderSettings.m_WanderCircleRadius * (float)Mathf.Sin(m_WanderAngle));
-        
+
 
         m_EnemyMovement.m_VelocityDesired = centerOfCircle + offset;
     }
@@ -371,7 +374,7 @@ public class PathFollowing : IEnemyMovementState
             Debug.Log(m_CurrentWaypoint);
             if (m_Reverse)
             {
-                m_CurrentWaypoint--;    
+                m_CurrentWaypoint--;
             }
             else
             {
@@ -394,10 +397,6 @@ public class CollisionAvoidance : IEnemyMovementState
 
     private const int m_ObstacleLayer = 1 << 8;
 
-    private RaycastHit m_Hit;
-    private bool m_HitFound = false;
-    private Vector3 m_SensorPosition;
-
     public CollisionAvoidance(EnemyMovement refObject)
     {
         m_EnemyMovement = refObject;
@@ -409,10 +408,12 @@ public class CollisionAvoidance : IEnemyMovementState
 
     public void Update()
     {
-        if(Physics.Raycast(m_EnemyMovement.m_Position, m_EnemyMovement.m_Velocity, out m_Hit,
+        RaycastHit m_Hit;
+
+        Vector3 m_SensorPosition;
+        if (Physics.Raycast(m_EnemyMovement.m_Position, m_EnemyMovement.m_Velocity, out m_Hit,
             m_EnemyMovement.m_AvoidanceSettings.m_AvoidanceDistance, m_ObstacleLayer, QueryTriggerInteraction.Ignore))
         {
-            m_HitFound = true;
 
             m_SensorPosition = m_EnemyMovement.m_Position + m_EnemyMovement.m_Velocity.normalized * m_EnemyMovement.m_AvoidanceSettings.m_AvoidanceDistance;
 
@@ -420,9 +421,44 @@ public class CollisionAvoidance : IEnemyMovementState
             Vector3 positionTarget = m_SensorPosition + velocityDesired;
             m_EnemyMovement.m_VelocityDesired = velocityDesired;
         }
-        else
+    }
+
+    public void OnExit()
+    {
+
+    }
+}
+
+public class WallAvoidance : IEnemyMovementState
+{
+    private EnemyMovement m_EnemyMovement;
+
+    private const int m_ObstacleLayer = 1 << 8;
+
+    public WallAvoidance(EnemyMovement refObject)
+    {
+        m_EnemyMovement = refObject;
+    }
+
+    public void OnEnter()
+    {
+    }
+
+    public void Update()
+    {
+        RaycastHit m_Hit;
+
+        Vector3 m_SensorPosition;
+        if (Physics.Raycast(m_EnemyMovement.m_Position, m_EnemyMovement.m_Velocity, out m_Hit,
+            m_EnemyMovement.m_AvoidanceSettings.m_AvoidanceDistance, m_ObstacleLayer, QueryTriggerInteraction.Ignore))
         {
-            m_HitFound = false;
+
+            m_SensorPosition = m_EnemyMovement.m_Position + m_EnemyMovement.m_Velocity.normalized * m_EnemyMovement.m_AvoidanceSettings.m_AvoidanceDistance;
+
+            Vector3 velocityDesired = (m_SensorPosition - m_Hit.collider.transform.position).normalized * m_EnemyMovement.m_AvoidanceSettings.m_MaxAvoidanceForce;
+            velocityDesired += m_Hit.normal * 10000000000;
+            Vector3 positionTarget = m_SensorPosition + velocityDesired;
+            m_EnemyMovement.m_VelocityDesired = velocityDesired;
         }
     }
 
